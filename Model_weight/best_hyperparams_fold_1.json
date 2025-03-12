@@ -1,0 +1,8 @@
+{
+    "batch_size": 10,
+    "lr": 0.014112573318252919,
+    "patch_size": 31,
+    "freeze_encoder": false,
+    "epochs": 20,
+    "model_path": "New_Models/models_patchGAN/best_model_fold_1.pth"
+}
