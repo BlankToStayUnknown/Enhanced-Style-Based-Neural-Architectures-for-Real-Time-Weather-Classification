@@ -9,9 +9,9 @@ from torch.utils.tensorboard import SummaryWriter
 import random
 import cv2
 import hdbscan
-from Functions.functions import run_camera, load_model_weights, print_model_parameters, test_classifier, test_folder_predictions, perform_tsne, plot_tsne_interactive, compute_embeddings_with_paths, watch_folders_predictions
+from Functions.function_PatchGAN import run_camera, load_model_weights, print_model_parameters, test_classifier, test_folder_predictions, perform_tsne, plot_tsne_interactive, compute_embeddings_with_paths, watch_folders_predictions
 from datas import MultiTaskDataset
-from Models.models import MultiTaskPatchGANTest
+from Models.models_PatchGAN import MultiTaskPatchGANTest
 # -------------------------------------------------------------------
 # Le dictionnaire de colormaps OpenCV pour Grad-CAM
 # -------------------------------------------------------------------

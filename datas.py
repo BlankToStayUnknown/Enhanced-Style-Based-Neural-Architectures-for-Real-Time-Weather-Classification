@@ -58,3 +58,4 @@ class MultiTaskDataset(Dataset):
             image = self.transform(image)
         return image, labels
 
+

@@ -9,8 +9,8 @@ from torchvision import transforms
 from sklearn.model_selection import KFold
 from datas import MultiTaskDataset
 from torch.utils.tensorboard import SummaryWriter
-from Models.models import MultiTaskPatchGAN
-from Functions.functions import train_model, evaluate_model
+from Models.models_PatchGAN import MultiTaskPatchGAN
+from Functions.function_PatchGAN import train_model, evaluate_model
 
 # -----------------------------------------------------------------------
 # MAIN: ENTRAINEMENT MULTI-FOLD AVEC CHARGEMENT DES HYPERPARAMÈTRES VIA config_path
