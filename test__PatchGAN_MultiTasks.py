@@ -76,6 +76,8 @@ def main():
     parser.add_argument('--test_images_folder', type=str, help='Chemin vers le dossier contenant les images de test (utilisé en mode folder)')
     parser.add_argument('--test_following_task', type=str, default=None,
                         help='indique la tâche pour le test')
+    parser.add_argument('--search_folder',  type=str, default=None, help='Search file')
+
     parser.add_argument('--watch_folders', type=str, default=None,
                         help='Liste (virgule séparée) de dossiers à surveiller pour les images de test')
     parser.add_argument('--poll_intervals', type=str, default=None,
