@@ -5,15 +5,10 @@ import torch
 import torch.nn as nn
 from torchvision import transforms
 from torch.utils.data import DataLoader, Subset, Dataset
-from torch.utils.tensorboard import SummaryWriter
-import numpy as np
-import random
+
 import time
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
-from PIL import Image
-import cv2
-from screeninfo import get_monitors
-# Outils pour t-SNE et visualisation
+
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
@@ -23,7 +18,8 @@ from tkinter import ttk
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
-
+import threading
+import re
 from sklearn.metrics import f1_score
 import os
 import json
@@ -1278,27 +1274,19 @@ def evaluate_model(model, val_loader, criterions_dict, writer=None, fold=0):
 
 
 
-def watch_folder_predictions(model, tasks, watch_folder, transform, device, save_dir,save_dir_to_canon, poll_interval=5):
+def process_watch_folder(model, tasks, watch_folder, transform, device, sub_save_dir, poll_interval,
+                         save_dir_to_canon=None, is_first=False):
     """
-    Surveille en continu un dossier (watch_folder) contenant des images nommées avec un timestamp
-    (ex: "2025-03-12_09-54-01.jpg"). À chaque nouvelle image détectée (la plus récente),
-    le modèle est appliqué et :
-      - Un fichier JSON "last_prediction.json" est mis à jour avec la prédiction de cette image (écrasant la précédente).
-      - Un historique des prédictions est mis à jour dans un DataFrame, puis sauvegardé en CSV ("prediction_history.csv").
-
-    Args:
-        model (torch.nn.Module): Le modèle multi-tâches chargé.
-        tasks (dict): Dictionnaire associant chaque tâche à la liste de ses classes.
-        watch_folder (str): Dossier à surveiller.
-        transform: Transformation à appliquer aux images.
-        device: Appareil (CPU ou GPU).
-        save_dir (str): Dossier où enregistrer les sorties (JSON et CSV).
-        poll_interval (int, optional): Intervalle de sondage en secondes.
+    Surveille en continu un dossier watch_folder contenant des images nommées avec un timestamp.
+    Seuls les fichiers dont le nom (sans extension) correspond au format "YYYY-MM-DD_HH-MM-SS" sont considérés.
+    Pour chaque nouvelle image détectée, le modèle est appliqué et :
+      - Le fichier "last_prediction.json" est mis à jour avec le nom de l'image, le timestamp et la prédiction.
+      - L'historique est mis à jour dans "prediction_history.csv" (la colonne "image" contient le nom exact).
+      - Si save_dir_to_canon est spécifié et is_first True, la prédiction est aussi enregistrée dans save_dir_to_canon/WeatherInfos.json.
     """
-    # Charger (ou créer) l'historique des prédictions dans un DataFrame
-    history_file = os.path.join(save_dir, "prediction_history.csv")
-    # Définir les colonnes : timestamp + pour chaque tâche, predicted_class et probability
-    columns = ["timestamp"]
+    os.makedirs(sub_save_dir, exist_ok=True)
+    history_file = os.path.join(sub_save_dir, "prediction_history.csv")
+    columns = ["timestamp", "image"]
     for t, class_list in tasks.items():
         columns.extend([f"{t}_predicted_class", f"{t}_probability"])
     if os.path.exists(history_file):
@@ -1306,18 +1294,24 @@ def watch_folder_predictions(model, tasks, watch_folder, transform, device, save
     else:
         history_df = pd.DataFrame(columns=columns)
 
-    last_processed = None  # pour mémoriser le dernier fichier traité
-
-    print(f"Surveillance du dossier {watch_folder} toutes les {poll_interval} secondes...")
+    last_processed = None
+    # Expression régulière pour vérifier le format timestamp (sans extension)
+    timestamp_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$')
+    print(f"[{watch_folder}] Surveillance toutes les {poll_interval} secondes dans {sub_save_dir}...")
     while True:
         files = [f for f in os.listdir(watch_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))]
-        if not files:
+        # Filtrer uniquement les fichiers dont le nom correspond au pattern
+        valid_files = []
+        for f in files:
+            name_no_ext = os.path.splitext(f)[0]
+            if timestamp_pattern.match(name_no_ext):
+                valid_files.append(f)
+        if not valid_files:
             time.sleep(poll_interval)
             continue
 
-        # On suppose que les noms suivent le format ISO "YYYY-MM-DD_HH-MM-SS.ext"
-        files.sort()
-        last_file = files[-1]
+        valid_files.sort()
+        last_file = valid_files[-1]
         if last_file == last_processed:
             time.sleep(poll_interval)
             continue
@@ -1327,7 +1321,7 @@ def watch_folder_predictions(model, tasks, watch_folder, transform, device, save
         try:
             img = Image.open(full_path).convert('RGB')
         except Exception as e:
-            print(f"Erreur lors du chargement de {full_path}: {e}")
+            print(f"[{watch_folder}] Erreur lors du chargement de {full_path}: {e}")
             time.sleep(poll_interval)
             continue
 
@@ -1336,7 +1330,6 @@ def watch_folder_predictions(model, tasks, watch_folder, transform, device, save
             outputs = model(input_tensor)
 
         prediction = {}
-        # Pour chaque tâche, extraire la prédiction
         for t, output in outputs.items():
             probabilities = torch.softmax(output, dim=1)
             max_prob, pred_idx = torch.max(probabilities, dim=1)
@@ -1345,39 +1338,74 @@ def watch_folder_predictions(model, tasks, watch_folder, transform, device, save
             predicted_class = tasks[t][pred_idx] if pred_idx < len(tasks[t]) else "Unknown"
             prediction[t] = {"predicted_class": predicted_class, "probability": max_prob}
 
-        # Extraire le timestamp à partir du nom de fichier (en supprimant l'extension)
-        timestamp_str = os.path.splitext(last_file)[0]  # ex: "2025-03-12_09-54-01"
+        # Le nom du fichier (sans extension) est utilisé comme timestamp si possible
+        timestamp_str = os.path.splitext(last_file)[0]
         try:
-            timestamp_dt = datetime.datetime.strptime(timestamp_str, "%Y-%m-%d_%H-%M-%S")
+            datetime.datetime.strptime(timestamp_str, "%Y-%m-%d_%H-%M-%S")
         except Exception as e:
-            print(f"Erreur de parsing du timestamp pour {last_file}: {e}")
-            timestamp_dt = datetime.datetime.now()
-            timestamp_str = timestamp_dt.strftime("%Y-%m-%d_%H-%M-%S")
+            print(f"[{watch_folder}] Erreur de parsing du timestamp pour {last_file}: {e}")
+            timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-        # Enregistrer le JSON de la dernière prédiction (écrase le précédent)
-        last_pred_json = os.path.join(save_dir, "last_prediction.json")
+        # Enregistrement du JSON de la dernière prédiction dans sub_save_dir
+        last_pred_json = os.path.join(sub_save_dir, "last_prediction.json")
         with open(last_pred_json, "w") as f:
-            json.dump({"timestamp": timestamp_str, "prediction": prediction}, f, indent=4)
-        print(f"Prédiction de {last_file} enregistrée dans {last_pred_json}")
+            json.dump({"timestamp": timestamp_str, "image": last_file, "prediction": prediction}, f, indent=4)
+        print(f"[{watch_folder}] Prédiction de {last_file} enregistrée dans {last_pred_json}")
 
-        if save_dir_to_canon != None:
-            # Enregistrer le JSON de la dernière prédiction (écrase le précédent)
-            last_pred_json = os.path.join(save_dir_to_canon, "WeatherInfos.json")
-            with open(last_pred_json, "w") as f:
-                json.dump({"timestamp": timestamp_str, "prediction": prediction}, f, indent=4)
-            print(f"Prédiction de {last_file} enregistrée dans {last_pred_json}")
+        if save_dir_to_canon is not None and is_first:
+            os.makedirs(save_dir_to_canon, exist_ok=True)
+            canon_json = os.path.join(save_dir_to_canon, "WeatherInfos.json")
+            with open(canon_json, "w") as f:
+                json.dump({"timestamp": timestamp_str, "image": last_file, "prediction": prediction}, f, indent=4)
+            print(f"[{watch_folder}] Prédiction de {last_file} enregistrée dans {canon_json}")
 
-
-        # Mettre à jour l'historique (ajouter une ligne dans le DataFrame)
-        row = {"timestamp": timestamp_str}
+        # Mise à jour de l'historique
+        row = {"timestamp": timestamp_str, "image": last_file}
         for t, pred in prediction.items():
             row[f"{t}_predicted_class"] = pred["predicted_class"]
             row[f"{t}_probability"] = pred["probability"]
-        # Utilisation de pd.concat à la place de .append pour éviter l'erreur
         history_df = pd.concat([history_df, pd.DataFrame([row])], ignore_index=True)
-        # Sauvegarder l'historique en CSV
         history_df.to_csv(history_file, index=False)
-        print(f"Historique mis à jour : {history_file}")
+        print(f"[{watch_folder}] Historique mis à jour dans {history_file}")
 
         time.sleep(poll_interval)
+
+
+def watch_folders_predictions(model, tasks, watch_folders, poll_intervals, transform, device, save_dir,
+                              save_dir_to_canon=None):
+    """
+    Surveille plusieurs dossiers simultanément.
+    Pour chaque dossier de watch_folders, les sorties (last_prediction.json et prediction_history.csv)
+    sont enregistrées dans un sous-dossier de save_dir portant le même nom que le dossier surveillé.
+
+    Si save_dir_to_canon est spécifié, pour le premier dossier de la liste, la prédiction est aussi enregistrée
+    dans save_dir_to_canon/WeatherInfos.json.
+
+    Args:
+        model (torch.nn.Module): Le modèle multi-tâches chargé.
+        tasks (dict): Dictionnaire associant chaque tâche à la liste de ses classes.
+        watch_folders (list): Liste des dossiers à surveiller.
+        poll_intervals (list): Liste des intervalles (en secondes) de sondage pour chaque dossier.
+        transform: Transformation à appliquer aux images.
+        device: Appareil (CPU ou GPU).
+        save_dir (str): Dossier de base pour enregistrer les sorties.
+        save_dir_to_canon (str, optional): Dossier pour enregistrer "WeatherInfos.json" pour le premier dossier.
+    """
+    if len(watch_folders) != len(poll_intervals):
+        raise ValueError("Le nombre de dossiers et d'intervalles doit être identique.")
+
+    threads = []
+    for idx, folder in enumerate(watch_folders):
+        folder_name = os.path.basename(os.path.normpath(folder))
+        sub_save_dir = os.path.join(save_dir, folder_name)
+        is_first = (idx == 0)
+        t = threading.Thread(target=process_watch_folder, args=(
+        model, tasks, folder, transform, device, sub_save_dir, poll_intervals[idx], save_dir_to_canon, is_first))
+        t.daemon = True
+        threads.append(t)
+        t.start()
+        print(f"Lancement de la surveillance pour {folder} avec un intervalle de {poll_intervals[idx]} secondes.")
+
+    for t in threads:
+        t.join()
 

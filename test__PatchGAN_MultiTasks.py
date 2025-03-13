@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 import random
 import cv2
 import hdbscan
-from Functions.functions import run_camera, load_model_weights, print_model_parameters, test_classifier, test_folder_predictions, perform_tsne, plot_tsne_interactive, compute_embeddings_with_paths, watch_folder_predictions
+from Functions.functions import run_camera, load_model_weights, print_model_parameters, test_classifier, test_folder_predictions, perform_tsne, plot_tsne_interactive, compute_embeddings_with_paths, watch_folders_predictions
 from datas import MultiTaskDataset
 from Models.models import MultiTaskPatchGANTest
 # -------------------------------------------------------------------
@@ -244,14 +244,29 @@ def main():
         run_camera(model, tasks_json, args.save_dir, args.prob_threshold, args.measure_time,
                    args.camera_index, args.kalman_filter, args.save_camera_video)
 
-    elif args.mode == 'watch_folder':
-        if args.watch_folder == None:
-            raise ValueError("--watch_folder doit être spécifié en mode watch_folder")
+
+    elif args.mode == "watch_folder":
+
+        if args.watch_folders is None:
+            raise ValueError("--watch_folders doit être spécifié en mode watch_folder")
+
+        # Convertir les listes séparées par des virgules en listes Python
+
+        watch_folders = [s.strip() for s in args.watch_folders.split(',')]
+
+        if args.poll_intervals is None:
+
+            # Si aucun intervalle n'est spécifié, utiliser 5 secondes par défaut pour tous
+
+            poll_intervals = [5] * len(watch_folders)
+
 
         else:
-            # Appel de la fonction de surveillance
-            watch_folder_predictions(model, tasks_json, args.watch_folder, transform, device, args.save_dir,args.save_dir_to_canon,
-                                     poll_interval=5)
+
+            poll_intervals = [int(s.strip()) for s in args.poll_intervals.split(',')]
+
+        watch_folders_predictions(model, tasks_json, watch_folders, poll_intervals, transform, device, args.save_dir,
+                                  args.save_dir_to_canon)
     if writer:
         writer.close()
 
