@@ -28,6 +28,7 @@ Before running the model, ensure you have **Python 3.8.19** installed. You can c
 ```bash
 pip install -r requirements.txt
 ```
+See the "readme_installation_on_window.txt" file for installation on Windows operating system
 
 ## 🎯 Quick Test: PatchGAN-MultiTasks (PM) Model
 
