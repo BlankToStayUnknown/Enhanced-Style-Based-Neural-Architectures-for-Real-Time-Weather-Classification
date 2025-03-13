@@ -11,3 +11,4 @@ scikit_learn==1.3.2
 screeninfo==0.8.1
 torch==2.2.0
 torchvision==0.17.0
+tensorboard
