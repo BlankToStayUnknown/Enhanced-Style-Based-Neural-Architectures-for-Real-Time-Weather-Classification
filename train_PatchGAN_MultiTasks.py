@@ -36,6 +36,7 @@ def main():
                         help='Chemin vers le fichier JSON contenant les hyperparamètres')
     parser.add_argument('--search_folder',  type=str, default=None, help='Search file')
 
+
     args = parser.parse_args()
 
     # Si un fichier de config est fourni, on charge les hyperparamètres

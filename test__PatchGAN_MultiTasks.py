@@ -76,9 +76,12 @@ def main():
     parser.add_argument('--test_images_folder', type=str, help='Chemin vers le dossier contenant les images de test (utilisé en mode folder)')
     parser.add_argument('--test_following_task', type=str, default=None,
                         help='indique la tâche pour le test')
-    parser.add_argument('--search_folder',  type=str, default=None, help='Search file')
-    parser.add_argument('--watch_folder', type=str, default=None, help='Dossier à surveiller pour les images de test')
-    parser.add_argument('--save_dir_to_canon', default=None, type=str, help='Répertoire de sortie pour les résultats')
+    parser.add_argument('--watch_folders', type=str, default=None,
+                        help='Liste (virgule séparée) de dossiers à surveiller pour les images de test')
+    parser.add_argument('--poll_intervals', type=str, default=None,
+                        help='Liste (virgule séparée) des intervalles (en secondes) de sondage pour chaque dossier')
+    parser.add_argument('--save_dir_to_canon', default=None, type=str,
+                        help='Répertoire de sortie pour le fichier WeatherInfos.json (pour le premier dossier)')
 
 
     args = parser.parse_args()
@@ -134,7 +137,7 @@ def main():
         print_model_parameters(model)
 
     # En fonction du mode, on charge le dataset (sauf en mode camera)
-    if args.mode in ['classifier', 'clustering', 'tsne', 'tsne_interactive', 'folder']:
+    if args.mode in ['classifier', 'clustering', 'tsne', 'tsne_interactive', 'folder', 'watch_folder']:
         if not args.data:
             raise ValueError("Vous devez spécifier --data pour le mode classifier/clustering/tsne.")
         transform = transforms.Compose([
@@ -245,6 +248,8 @@ def main():
                    args.camera_index, args.kalman_filter, args.save_camera_video)
 
 
+
+
     elif args.mode == "watch_folder":
 
         if args.watch_folders is None:
@@ -267,8 +272,10 @@ def main():
 
         watch_folders_predictions(model, tasks_json, watch_folders, poll_intervals, transform, device, args.save_dir,
                                   args.save_dir_to_canon)
+
     if writer:
         writer.close()
+
 
 if __name__=="__main__":
     main()
