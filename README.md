@@ -7,6 +7,10 @@ This project explores **style-based neural architectures** for real-time **weath
 ## 💡 Idea behind our article
 
 
+https://github.com/user-attachments/assets/1ddeb22f-9a77-400d-86e5-d87c97c9e727
+
+
+
  
 ## 🎥 Real-time demonstration
 
