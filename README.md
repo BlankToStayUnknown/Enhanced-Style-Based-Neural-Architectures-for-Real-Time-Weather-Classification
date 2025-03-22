@@ -9,6 +9,8 @@ This project explores **style-based neural architectures** for real-time **weath
 
 https://github.com/user-attachments/assets/1ddeb22f-9a77-400d-86e5-d87c97c9e727
 
+Find a better quality video here: 
+
 
 
  
@@ -23,6 +25,7 @@ https://github.com/user-attachments/assets/622c3aaf-647b-423b-a1ca-0ce9f93d46ae
 
 
 
+Find a better quality video here: 
 
 
 
