@@ -66,4 +66,8 @@ python test__PatchGAN_MultiTasks.py --data datas/test.json \
 ---
 
 Stay tuned for updates! 📢 We will be releasing more resources and datasets soon.
+
+
+### Addition of the code on the benchmark test before Saturday 05/17/2024 at midnight
 ```
+
