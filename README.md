@@ -68,6 +68,6 @@ python test__PatchGAN_MultiTasks.py --data datas/test.json \
 Stay tuned for updates! 📢 We will be releasing more resources and datasets soon.
 ### Distribution of the dataset
 ![Dataset_repartition.png](images/Dataset_repartition.png)
-### Addition of the code on the benchmark test before Saturday 05/19/2024 at midnight
+### Addition of the code on the benchmark test before Tuesday 05/19/2024 at midnight
 ```
 
