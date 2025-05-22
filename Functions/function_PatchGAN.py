@@ -3,7 +3,6 @@ import torch.nn as nn
 from torch.utils.data import Subset
 import time
 from sklearn.manifold import TSNE
-from itertools import cycle
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 import threading
@@ -20,7 +19,7 @@ from sklearn.metrics import (
     roc_auc_score, roc_curve, confusion_matrix
 )
 import matplotlib.pyplot as plt
-
+import itertools
 
 
 

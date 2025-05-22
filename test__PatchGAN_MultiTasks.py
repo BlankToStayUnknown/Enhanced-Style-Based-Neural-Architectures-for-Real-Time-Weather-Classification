@@ -48,7 +48,7 @@ def main():
     parser.add_argument('--batch_size', default=32, type=int, help='Taille de lot pour le test')
     parser.add_argument('--save_dir', default='results', type=str, help='Répertoire de sortie pour les résultats')
     parser.add_argument('--tensorboard', action='store_true', help='Activer TensorBoard')
-    parser.add_argument('--mode', choices=['classifier', 'tsne', 'tsne_interactive', 'camera', 'clustering', 'folder', 'watch_folder'],
+    parser.add_argument('--mode', choices=['classifier', 'tsne', 'tsne_interactive', 'camera', 'clustering', 'folder', 'watch_folder', 'benchmark'],
                         default='classifier', help='Mode d\'opération')
     parser.add_argument('--prob_threshold', default=0.5, type=float, help='Seuil de probabilité pour considérer Inconnu')
     parser.add_argument('--visualize_gradcam', action='store_true', help='Activer Grad-CAM')
@@ -84,6 +84,17 @@ def main():
                         help='Liste (virgule séparée) des intervalles (en secondes) de sondage pour chaque dossier')
     parser.add_argument('--save_dir_to_canon', default=None, type=str,
                         help='Répertoire de sortie pour le fichier WeatherInfos.json (pour le premier dossier)')
+
+    parser.add_argument('--benchmark_folder', type=str,
+                        help="Dossier racine du benchmark_patchGAN_Gram (sous-dossiers = classes)")
+    parser.add_argument('--benchmark_mapping', type=str,
+                        help="JSON de mapping benchmark_patchGAN_Gram→modèle")
+    parser.add_argument('--roc_output', type=str, default='roc_curves',
+                        help="Répertoire où enregistrer les courbes ROC")
+
+    parser.add_argument('--auto_mapping',
+                        action='store_true',
+                        help='Cherche automatiquement la meilleure correspondance classes-modèle→benchmark_patchGAN_Gram')
 
 
     args = parser.parse_args()
@@ -261,7 +272,7 @@ def main():
             args.save_camera_video
         )
 
-    elif args.mode == 'benchmark_patchGAN_Gram':
+    elif args.mode == 'benchmark':
         if not args.benchmark_folder or not args.benchmark_mapping:
             raise ValueError("Pour le mode 'benchmark_patchGAN_Gram', précisez --benchmark_folder et --benchmark_mapping")
         transform = transforms.Compose([
