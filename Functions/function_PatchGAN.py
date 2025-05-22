@@ -1,26 +1,13 @@
-import argparse
-import os
-import json
 import torch
 import torch.nn as nn
-from torchvision import transforms
-from torch.utils.data import DataLoader, Subset, Dataset
-
+from torch.utils.data import Subset
 import time
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
-
 from sklearn.manifold import TSNE
-import matplotlib.pyplot as plt
-
-import tkinter as tk
-from tkinter import ttk
-
+from itertools import cycle
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
-
 import threading
 import re
-from sklearn.metrics import f1_score
 import os
 import json
 import cv2
@@ -28,7 +15,11 @@ import numpy as np
 from PIL import Image
 import datetime
 import pandas as pd
-
+from sklearn.metrics import (
+    precision_score, recall_score, f1_score,
+    roc_auc_score, roc_curve, confusion_matrix
+)
+import matplotlib.pyplot as plt
 
 
 
@@ -805,178 +796,169 @@ def test_classifier(model, test_loader, criterions, writer, save_dir, device, ta
 # -------------------------------------------------------------------
 # 11) CAMERA
 # -------------------------------------------------------------------
-def run_camera(model, tasks_json, save_dir, prob_threshold, measure_time, camera_index,
-               kalman_filter=False, save_camera_video=False):
-    device = model.device if hasattr(model, 'device') else torch.device('cpu')
+def run_camera(model, transform, tasks, save_dir, prob_threshold, measure_time,
+               camera_index, kalman_filter, save_camera_video):
+    import tkinter as tk
+    from tkinter import ttk
+    import time
+    from screeninfo import get_monitors
+
+    device = model.device
     model.eval()
+
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
-        print(f"Impossible d'ouvrir la caméra {camera_index}")
+        print("Erreur : Impossible d'ouvrir la caméra")
         return
 
-    # Récupération des dimensions de l'écran (si nécessaire)
-    from screeninfo import get_monitors
-    monitors = get_monitors()
-    screen = monitors[0]
-    screen_width = screen.width
-    screen_height = screen.height
-
-    # Créer la fenêtre de la caméra en mode normal pour que les contrôles soient visibles
+    screen = get_monitors()[0]
+    screen_width, screen_height = screen.width, screen.height
     cv2.namedWindow("Camera", cv2.WINDOW_NORMAL)
-    # Variable pour suivre l'état plein écran
     full_screen_state = False
 
-    # Variables de contrôle pour l'enregistrement
-    recording = False
-    video_writer = None
-
-    # Création de l'interface de contrôle avec Tkinter
+    # ---------------- GUI Tkinter ----------------
     control_window = tk.Tk()
     control_window.title("Contrôle Enregistrement")
-
-    # Variable Tkinter pour le statut d'enregistrement
     rec_var = tk.BooleanVar(value=False)
-    # Zone de texte pour le nom de la vidéo
     video_name_var = tk.StringVar()
 
     def toggle_recording():
         nonlocal recording, video_writer
         recording = not recording
         rec_var.set(recording)
-        if recording:
-            btn_toggle.config(text="Arrêter l'enregistrement")
-        else:
-            btn_toggle.config(text="Démarrer l'enregistrement")
-            if video_writer is not None:
-                video_writer.release()
-                video_writer = None
+        btn_toggle.config(text="Arrêter l'enregistrement" if recording else "Démarrer l'enregistrement")
+        if not recording and video_writer:
+            video_writer.release()
+            video_writer = None
+            print("Enregistrement arrêté.")
 
     def toggle_fullscreen():
         nonlocal full_screen_state
-        if not full_screen_state:
-            cv2.setWindowProperty("Camera", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-            btn_fullscreen.config(text="Quitter le plein écran")
-        else:
-            cv2.setWindowProperty("Camera", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
-            btn_fullscreen.config(text="Plein écran")
+        prop = cv2.WND_PROP_FULLSCREEN
+        cv2.setWindowProperty("Camera", prop,
+                              cv2.WINDOW_FULLSCREEN if not full_screen_state else cv2.WINDOW_NORMAL)
+        btn_fullscreen.config(text="Quitter le plein écran" if not full_screen_state else "Plein écran")
         full_screen_state = not full_screen_state
 
-    # Interface de contrôle
-    lbl = ttk.Label(control_window, text="Nom de la vidéo (optionnel) :")
-    lbl.pack(padx=10, pady=5)
-    entry_video = ttk.Entry(control_window, textvariable=video_name_var, width=30)
-    entry_video.pack(padx=10, pady=5)
-
+    ttk.Label(control_window, text="Nom de la vidéo (optionnel) :").pack(padx=10, pady=5)
+    ttk.Entry(control_window, textvariable=video_name_var, width=30).pack(padx=10, pady=5)
     btn_toggle = ttk.Button(control_window, text="Démarrer l'enregistrement", command=toggle_recording)
     btn_toggle.pack(padx=10, pady=5)
-
     btn_fullscreen = ttk.Button(control_window, text="Plein écran", command=toggle_fullscreen)
     btn_fullscreen.pack(padx=10, pady=5)
-
-    # Positionnement de la fenêtre de contrôle (peut être ajusté)
     control_window.geometry("300x200+50+50")
 
-    times = []
+    # ---------------- Pré-calcul overlay ----------------
+    font         = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale   = 1.0
+    thickness    = 2
+    padding_x    = 10
+    padding_y    = 10
+    y0, y_step   = 40, 40                   # première ligne et espacement
 
-    if save_camera_video:
-        print("Option --save_video activée. Utilisez le bouton d'enregistrement pour démarrer/arrêter la vidéo.")
-    else:
-        print("Enregistrement vidéo désactivé (--save_video non spécifié).")
+    # Largeur maximale : on construit la ligne la plus longue possible
+    def longest_label(lst):         # Unknown inclus
+        return max(lst + ["Unknown"], key=len)
 
-    # Préparation du Kalman Filter si activé
+    sample_lines = [
+        f"{task}: {longest_label(cls)} (1.00)"
+        for task, cls in tasks.items()
+    ]
+    text_sizes      = [cv2.getTextSize(l, font, font_scale, thickness)[0] for l in sample_lines]
+    max_text_width  = max(w for (w, h) in text_sizes)
+    font_height     = max(h for (w, h) in text_sizes)
+
+    # Rectangle fixe
+    box_left        = 0
+    box_top         = y0 - font_height - padding_y        # assez haut pour couvrir la 1ʳᵉ ligne
+    box_right       = max_text_width + 2 * padding_x
+    box_bottom      = y0 + (len(tasks) - 1) * y_step + padding_y
+
+    # ---------------- Kalman optionnel ----------------
     if kalman_filter:
         from pykalman import KalmanFilter
-        kf_dict = {}
-        state_means = {}
-        state_cov = {}
-        for tn, clist in tasks_json.items():
-            nb_cls = len(clist)
-            kf_dict[tn] = KalmanFilter(initial_state_mean=np.zeros(nb_cls),
-                                       initial_state_covariance=np.eye(nb_cls),
-                                       n_dim_obs=nb_cls)
-            state_means[tn] = np.zeros(nb_cls)
-            state_cov[tn] = np.eye(nb_cls)
+        kf, state_means, state_cov = {}, {}, {}
+        for t, cls in tasks.items():
+            M = len(cls)
+            kf[t] = KalmanFilter(initial_state_mean=np.zeros(M),
+                                 initial_state_covariance=np.eye(M),
+                                 n_dim_obs=M)
+            state_means[t] = np.zeros(M)
+            state_cov[t]   = np.eye(M)
 
-    transform = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
+    # ---------------- Boucle vidéo ----------------
+    recording, video_writer = False, None
+    times = []
 
     while True:
         ret, frame = cap.read()
         if not ret:
+            print("Erreur : lecture caméra")
             break
-        start_t = time.time()
 
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        pil_img = Image.fromarray(frame_rgb)
-        img_tens = transform(pil_img).unsqueeze(0).to(device)
-        outputs = model(img_tens)
+        start = time.time()
+        img_tensor = transform(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))).unsqueeze(0).to(device)
+        with torch.no_grad():
+            outputs = model(img_tensor)
+        times.append(time.time() - start)
+
+        # ---------- Génération des lignes ----------
         text_lines = []
-        for tn, output in outputs.items():
-            probas = torch.softmax(output, dim=1)[0].detach().cpu().numpy()
+        for task, out in outputs.items():
+            probs = torch.softmax(out, 1)[0].detach().cpu().numpy()
             if kalman_filter:
-                state_means[tn], state_cov[tn] = kf_dict[tn].filter_update(
-                    state_mean=state_means[tn],
-                    state_covariance=state_cov[tn],
-                    observation=probas
-                )
-                probas = state_means[tn]
-            pred_idx = np.argmax(probas)
-            pred_prob = probas[pred_idx]
-            pred_label = "Unknown" if pred_prob < prob_threshold else tasks_json[tn][pred_idx]
-            text_lines.append(f"{tn}: {pred_label} ({pred_prob:.2f})")
-        end_t = time.time()
-        times.append(end_t - start_t)
+                sm, sc = kf[task].filter_update(state_means[task], state_cov[task], probs)
+                state_means[task], state_cov[task] = sm, sc
+                probs = sm
+            idx      = int(probs.argmax())
+            label    = "Unknown" if probs[idx] < prob_threshold else tasks[task][idx]
+            text_lines.append(f"{task}: {label} ({probs[idx]:.2f})")
 
-        frame_resized = cv2.resize(frame, (screen_width, screen_height))
-        y0 = 30
-        y_step = 40
+        # ---------- Affichage ----------
+        frame_res   = cv2.resize(frame, (screen_width, screen_height))
+
+        overlay = frame_res.copy()
+        cv2.rectangle(overlay,
+                      (box_left, box_top),
+                      (box_right, box_bottom),
+                      (255, 255, 255), thickness=-1)
+        cv2.addWeighted(overlay, 0.4, frame_res, 0.6, 0, frame_res)
+
         for i, line in enumerate(text_lines):
-            y_pos = y0 + i * y_step
-            cv2.putText(frame_resized, line, (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            y = y0 + i * y_step
+            cv2.putText(frame_res, line, (padding_x, y),
+                        font, font_scale, (0, 255, 0), thickness, cv2.LINE_AA)
 
+        # ---------- Enregistrement vidéo ----------
         if save_camera_video:
             if recording and video_writer is None:
-                # Si l'utilisateur n'a pas saisi de nom, on génère un nom avec timestamp
-                vname = video_name_var.get().strip()
-                if vname == "":
-                    vname = f"video_{int(time.time())}"
-                video_path = os.path.join(save_dir, f"{vname}.avi")
+                name = video_name_var.get().strip() or f"video_{int(time.time())}"
+                path = os.path.join(save_dir, f"{name}.avi")
                 fourcc = cv2.VideoWriter_fourcc(*'XVID')
-                video_writer = cv2.VideoWriter(video_path, fourcc, 20.0, (screen_width, screen_height))
-                print(f"Enregistrement démarré: {video_path}")
-            elif not recording and video_writer is not None:
+                video_writer = cv2.VideoWriter(path, fourcc, 20.0, (screen_width, screen_height))
+                print("Enregistrement démarré :", path)
+            elif not recording and video_writer:
                 video_writer.release()
-                print("Enregistrement arrêté.")
                 video_writer = None
+            if video_writer:
+                video_writer.write(frame_res)
 
-            if video_writer is not None:
-                video_writer.write(frame_resized)
-
-        cv2.imshow("Camera", frame_resized)
-        # Mise à jour de l'interface de contrôle Tkinter
+        cv2.imshow("Camera", frame_res)
         control_window.update()
-        if cv2.waitKey(1) == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
+    # ---------------- Nettoyage ----------------
     cap.release()
-    if video_writer is not None:
+    if video_writer:
         video_writer.release()
-        print("Enregistrement vidéo terminé.")
     cv2.destroyAllWindows()
-
-    if measure_time and len(times) > 0:
-        out_times = os.path.join(save_dir, "times_camera.json")
-        with open(out_times, 'w') as f:
-            import json
-            json.dump(times, f, indent=4)
-        print(f"Temps moyen: {np.mean(times):.4f}s, total: {np.sum(times):.4f}s")
-
-    # Fermeture de l'interface de contrôle
     control_window.destroy()
+
+    if measure_time and times:
+        with open(os.path.join(save_dir, "times_camera.json"), "w") as f:
+            json.dump(times, f, indent=2)
+        print(f"Temps moyen de traitement : {np.mean(times):.4f}s – total : {np.sum(times):.1f}s")
 
 
 
@@ -1409,3 +1391,223 @@ def watch_folders_predictions(model, tasks, watch_folders, poll_intervals, trans
     for t in threads:
         t.join()
 
+
+
+def test_benchmark_folder(
+    model: torch.nn.Module,
+    device: torch.device,
+    benchmark_folder: str,
+    mapping_path: str,
+    tasks_json: dict,
+    transform,
+    save_dir: str,
+    roc_dir: str,
+    auto_mapping: bool = False
+):
+    """
+    Évalue le modèle sur un dossier benchmark (images dans des sous-sous-dossiers).
+    - benchmark_folder : dossier racine, chaque sous-dossier de 1er niveau = classe benchmark.
+    - mapping_path     : JSON mapping benchmark_class -> [model_classes].
+    - tasks_json       : dict original (task -> [model_classes]).
+    - transform        : torchvision.transforms à appliquer.
+    - save_dir         : où écrire best_mapping.json et benchmark_summary.json.
+    - roc_dir          : où enregistrer les courbes ROC.
+    - auto_mapping     : si True, recherche exhaustive du mapping optimal.
+    """
+
+    # 1) Lecture du mapping initial
+    with open(mapping_path, 'r') as f:
+        initial_mapping = json.load(f)
+
+    # Benchmark classes par tâche
+    bench_classes = {
+        task: list(initial_mapping[task].keys())
+        for task in initial_mapping
+    }
+
+    # 2) Collecte récursive des paths et des labels ground-truth
+    images = []  # tuples (chemin_image, bench_cls)
+    for root, _, files in os.walk(benchmark_folder):
+        rel = os.path.relpath(root, benchmark_folder)
+        if rel == ".":
+            continue  # on est à la racine, pas de classe
+        top_cls = rel.split(os.sep)[0]  # nom du dossier de 1er niveau
+        # Ne garder que si c'est une classe définie dans au moins une tâche
+        if all(top_cls not in bench_classes[task] for task in bench_classes):
+            continue
+        for fn in files:
+            if not fn.lower().endswith(('.jpg', '.png', '.jpeg', '.bmp')):
+                continue
+            images.append((os.path.join(root, fn), top_cls))
+
+    # Initialisation des GT
+    gt = {task: [] for task in initial_mapping}
+    for _, bench_cls in images:
+        for task in initial_mapping:
+            lowers = [b.lower() for b in bench_classes[task]]
+            low = bench_cls.lower()
+            if low in lowers:
+                idx = lowers.index(low)
+            else:
+                idx = len(lowers) - 1
+            gt[task].append(idx)
+
+    # 3) Prédictions « fines » du modèle
+    model.to(device)
+    model.eval()
+    model_preds = {t: [] for t in initial_mapping}
+    model_probs = {t: [] for t in initial_mapping}
+
+    with torch.no_grad():
+        for img_path, _ in images:
+            img = Image.open(img_path).convert('RGB')
+            x = transform(img).unsqueeze(0).to(device)
+            outputs = model(x)
+            for task in initial_mapping:
+                probs = torch.softmax(outputs[task][0], dim=0).cpu().numpy()
+                model_probs[task].append(probs)
+                model_preds[task].append(int(probs.argmax()))
+
+    # 4) Matrices de confusion (model_class × bench_class)
+    confusion = {}
+    for task in initial_mapping:
+        M = len(tasks_json[task])
+        B = len(bench_classes[task])
+        C = np.zeros((M, B), dtype=int)
+        for mc, bc in zip(model_preds[task], gt[task]):
+            C[mc, bc] += 1
+        confusion[task] = C
+
+    # 5) Recherche du mapping optimal
+    inverted = {}
+    if auto_mapping:
+        print("\n=== Recherche exhaustive des mappings ===")
+        for task, C in confusion.items():
+            M, B = C.shape
+            best_score, best_vec = -1.0, None
+            for vec in itertools.product(range(B), repeat=M):
+                A = np.zeros((B, B), dtype=int)
+                for mc in range(M):
+                    A[vec[mc]] += C[mc]
+                # F1-macro
+                f1s = []
+                for b in range(B):
+                    tp = A[b, b]
+                    p_sum = A[b].sum()
+                    t_sum = A[:, b].sum()
+                    p = tp / p_sum if p_sum else 0.0
+                    r = tp / t_sum if t_sum else 0.0
+                    f1s.append(2*p*r/(p+r) if (p+r) else 0.0)
+                score = np.mean(f1s)
+                if score > best_score:
+                    best_score, best_vec = score, vec
+            inverted[task] = {
+                tasks_json[task][mc].lower(): best_vec[mc]
+                for mc in range(len(best_vec))
+            }
+            print(f"✅  Meilleur F1-macro « {task} » = {best_score:.4f}")
+    else:
+        for task, mp in initial_mapping.items():
+            inv = {}
+            for bidx, bench_cls in enumerate(bench_classes[task]):
+                for mc_name in mp[bench_cls]:
+                    inv[mc_name.lower()] = bidx
+            inverted[task] = inv
+
+    # 6) Mapping final
+    final_mapping = {}
+    for task, bench_list in bench_classes.items():
+        mp = {b: [] for b in bench_list}
+        for mc_name in tasks_json[task]:
+            bidx = inverted[task].get(mc_name.lower(), len(bench_list)-1)
+            mp[bench_list[bidx]].append(mc_name)
+        final_mapping[task] = mp
+
+    os.makedirs(save_dir, exist_ok=True)
+    with open(os.path.join(save_dir, "best_mapping.json"), 'w') as f:
+        json.dump(final_mapping, f, indent=2)
+
+    # 7) Remapping des prédictions vers benchmark
+    preds_b, probs_b = {}, {}
+    for task in initial_mapping:
+        B = len(bench_classes[task])
+        preds_b[task], probs_b[task] = [], []
+        for p_model in model_probs[task]:
+            p_bench = np.zeros(B, dtype=float)
+            for idx_mc, mc_name in enumerate(tasks_json[task]):
+                b = inverted[task].get(mc_name.lower(), B-1)
+                p_bench[b] += p_model[idx_mc]
+            probs_b[task].append(p_bench)
+            preds_b[task].append(int(p_bench.argmax()))
+
+    # 8) Calcul métriques + ROC
+    os.makedirs(roc_dir, exist_ok=True)
+    summary = {}
+    for task in initial_mapping:
+        y_true = np.array(gt[task])
+        y_pred = np.array(preds_b[task])
+        if not probs_b[task]:
+            print(f"[Warning] pas de probabilités pour la tâche '{task}', métriques ignorées.")
+            continue
+        y_prob = np.vstack(probs_b[task])
+        B = len(bench_classes[task])
+        labels = list(range(B))
+
+        # par classe
+        prec_pc = precision_score(y_true, y_pred, labels=labels, average=None, zero_division=0)
+        rec_pc  = recall_score(   y_true, y_pred, labels=labels, average=None, zero_division=0)
+        f1_pc   = f1_score(       y_true, y_pred, labels=labels, average=None, zero_division=0)
+        # macro
+        prec_m = precision_score(y_true, y_pred, average='macro', zero_division=0)
+        rec_m  = recall_score(   y_true, y_pred, average='macro', zero_division=0)
+        f1_m   = f1_score(       y_true, y_pred, average='macro', zero_division=0)
+
+        # AUC par classe et global
+        auc_pc = []
+        for i in range(B):
+            try:
+                auc_pc.append(roc_auc_score((y_true == i).astype(int), y_prob[:, i]))
+            except ValueError:
+                auc_pc.append(None)
+        auc_global = np.mean([a for a in auc_pc if a is not None]) if any(auc_pc) else None
+
+        # tracer ROC
+        plt.figure()
+        for i, color in zip(range(B), itertools.cycle([
+            'aqua','darkorange','cornflowerblue','green','red','purple','brown','olive'
+        ])):
+            if auc_pc[i] is None:
+                continue
+            fpr, tpr, _ = roc_curve((y_true == i).astype(int), y_prob[:, i])
+            plt.plot(fpr, tpr, color=color,
+                     label=f"{bench_classes[task][i]} (AUC={auc_pc[i]:.2f})")
+        plt.plot([0,1], [0,1], 'k--')
+        plt.xlabel("FPR")
+        plt.ylabel("TPR")
+        plt.title(f"ROC – {task}")
+        plt.legend(loc="lower right")
+        plt.savefig(os.path.join(roc_dir, f"roc_{task.replace(' ', '_')}.png"))
+        plt.close()
+
+        # stocker résumé
+        summary[task] = {
+            "n_samples": int(len(y_true)),
+            "per_class": {
+                "precision": {bench_classes[task][i]: float(prec_pc[i]) for i in labels},
+                "recall":    {bench_classes[task][i]: float(rec_pc[i])  for i in labels},
+                "f1_score":  {bench_classes[task][i]: float(f1_pc[i])   for i in labels},
+                "auc":       {bench_classes[task][i]: auc_pc[i]         for i in labels}
+            },
+            "global": {
+                "precision_macro": prec_m,
+                "recall_macro":    rec_m,
+                "f1_macro":        f1_m,
+                "auc_macro":       auc_global
+            }
+        }
+
+    # Sauvegarde du résumé
+    with open(os.path.join(save_dir, "benchmark_summary.json"), 'w') as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"\n✅  Résumé sauvé dans {os.path.join(save_dir,'benchmark_summary.json')}")

@@ -1,0 +1,66 @@
+{
+    "val_loss": 0.6313314318769746,
+    "val_acc": 0.9824005900380218,
+    "metrics": {
+        "Weather Type": {
+            "accuracy": 0.9863998779231679,
+            "precision": 0.9864120283587856,
+            "recall": 0.9863998779231679
+        },
+        "Weather Intensity": {
+            "accuracy": 0.980601228398123,
+            "precision": 0.9805980707252722,
+            "recall": 0.980601228398123
+        },
+        "Visibility": {
+            "accuracy": 0.9724564147560371,
+            "precision": 0.9724925426884651,
+            "recall": 0.9724564147560371
+        },
+        "Sky Condition": {
+            "accuracy": 0.9727616068363026,
+            "precision": 0.9728203952925641,
+            "recall": 0.9727616068363026
+        },
+        "Precipitation Presence": {
+            "accuracy": 0.9890512341204746,
+            "precision": 0.9890517072381422,
+            "recall": 0.9890512341204746
+        },
+        "Precipitation Intensity": {
+            "accuracy": 0.9822225613245337,
+            "precision": 0.9821971113013276,
+            "recall": 0.9822225613245337
+        },
+        "Ground Condition": {
+            "accuracy": 0.9643497501239843,
+            "precision": 0.9640637804714001,
+            "recall": 0.9643497501239843
+        },
+        "Glare or Reflections": {
+            "accuracy": 0.983901117765994,
+            "precision": 0.9837176890922439,
+            "recall": 0.983901117765994
+        },
+        "Light Conditions": {
+            "accuracy": 0.9908823866020676,
+            "precision": 0.9907932895375616,
+            "recall": 0.9908823866020676
+        },
+        "Road Spray": {
+            "accuracy": 0.9760996452142067,
+            "precision": 0.9756678667316685,
+            "recall": 0.9760996452142067
+        },
+        "Water On Window": {
+            "accuracy": 0.9927707625987106,
+            "precision": 0.9927514076621858,
+            "recall": 0.9927707625987106
+        },
+        "Snow On Window": {
+            "accuracy": 0.9973104947926601,
+            "precision": 0.9973038780708845,
+            "recall": 0.9973104947926601
+        }
+    }
+}

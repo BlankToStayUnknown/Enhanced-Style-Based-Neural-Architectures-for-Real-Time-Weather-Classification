@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 import random
 import cv2
 import hdbscan
-from Functions.function_PatchGAN import run_camera, load_model_weights, print_model_parameters, test_classifier, test_folder_predictions, perform_tsne, plot_tsne_interactive, compute_embeddings_with_paths, watch_folders_predictions
+from Functions.function_PatchGAN import run_camera, load_model_weights, print_model_parameters, test_classifier, test_folder_predictions, perform_tsne, plot_tsne_interactive, compute_embeddings_with_paths, watch_folders_predictions, test_benchmark_folder
 from datas import MultiTaskDataset
 from Models.models_PatchGAN import MultiTaskPatchGANTest
 # -------------------------------------------------------------------
@@ -245,9 +245,44 @@ def main():
         with open(out_cluster_path, 'w') as f:
             json.dump(clustering_results, f, indent=4)
         print(f"Clustering results saved to {out_cluster_path}")
+
+
     elif args.mode == 'camera':
-        run_camera(model, tasks_json, args.save_dir, args.prob_threshold, args.measure_time,
-                   args.camera_index, args.kalman_filter, args.save_camera_video)
+        transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        run_camera(
+            model, transform, tasks_json, args.save_dir,
+            args.prob_threshold, args.measure_time,
+            args.camera_index, args.kalman_filter,
+            args.save_camera_video
+        )
+
+    elif args.mode == 'benchmark_patchGAN_Gram':
+        if not args.benchmark_folder or not args.benchmark_mapping:
+            raise ValueError("Pour le mode 'benchmark_patchGAN_Gram', précisez --benchmark_folder et --benchmark_mapping")
+        transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        test_benchmark_folder(
+            model=model,
+            device=device,
+            benchmark_folder=args.benchmark_folder,
+            mapping_path=args.benchmark_mapping,
+            tasks_json=tasks_json,
+            transform=transform,
+            save_dir=args.save_dir,
+            roc_dir=args.roc_output,
+            auto_mapping=args.auto_mapping
+        )
+    if writer:
+        writer.close()
 
 
 
