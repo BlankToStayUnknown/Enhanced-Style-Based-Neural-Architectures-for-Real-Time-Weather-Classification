@@ -66,8 +66,20 @@ python test__PatchGAN_MultiTasks.py --data datas/test.json \
 ---
 
 Stay tuned for updates! 📢 We will be releasing more resources and datasets soon.
-### Distribution of the dataset
+## Distribution of the dataset
 ![Dataset_repartition.png](images/Dataset_repartition.png)
-### Addition of the code on the benchmark test before Tuesday 05/19/2024 at midnight
+## Benchmark validation
+
+To test the benchmarks, use the --mode benchmark option and specify the mapping file between your classes and those of the benchmark.
+
+```bash
+python test__PatchGAN_MultiTasks.py --build_classifier datas/classes_files.json \ 
+    --benchmark_mapping Test_benchmark/classes_correspondance_benchmark.json  \
+    --config_path Model_weight/PatchGAN_MultiTasks/best_model_fold_0_hyperparameters.json \ 
+    --model_path Model_weight/PatchGAN_MultiTasks/best_model_fold_0.pth \
+    --mode benchmark \
+    --benchmark_folder benchmark_dataset \ 
+    --save_dir results_test
+
 ```
 
